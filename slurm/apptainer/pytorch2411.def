@@ -1,0 +1,27 @@
+# BootStrap: docker
+# From: nvcr.io/nvidia/pytorch:24.11-py3
+Bootstrap: localimage
+From: slurm/apptainer/pytorch2411_base.sif
+
+%environment
+    export LC_ALL=C
+    export LC_CTYPE=C
+    export RED_PAJAMA_DATA_DIR=/data/RedPajama-Data-1T
+
+%files
+    requirements.txt
+
+%post
+    apt-get update
+
+    # install git lfs
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
+    apt-get install git-lfs
+    git lfs install
+
+    # install python packages
+    /usr/bin/python3 -m pip install -r requirements.txt
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    rm -rf /usr/local/cuda/compat/lib
