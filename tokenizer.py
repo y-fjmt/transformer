@@ -7,20 +7,26 @@ from dataset import WMT14_DE_EN
 
 class WMT14Tokenizer:
     
+    pad_token = '<pad>'
+    sos_token = '<sos>'
+    eos_token = '<eos>'
+    unk_token = '<unk>'
+    
     special_tokens = [
-        '<SOS>',
-        '<EOS>',
-        '<PAD>',
-        '<UKN>'
+        pad_token,
+        sos_token,
+        eos_token,
+        unk_token
     ]
     
     
     def __init__(
             self, 
             lang: Literal['en', 'de'], 
-            max_length: int = 256,
-            known_cnt: int = 500,
-            is_debug: bool = False
+            max_length: int = 128,
+            known_cnt: int = 3,
+            is_debug: bool = False,
+            hide_pbar: bool = False
         ) -> None:
         """tokenizerのインスタンスを作成
         """
@@ -31,14 +37,18 @@ class WMT14Tokenizer:
         dataset = load_dataset('wmt14', 'de-en', split='train')
         
         if is_debug:
-            known_cnt = 10
+            known_cnt = 1
             dataset = dataset.sort('translation')
             dataset = dataset.select(range(1000))
         
-        for col in tqdm(dataset):
+        for col in tqdm(dataset, disable=hide_pbar):
             text: str = col['translation'][lang]
             
-            tokens = self.tokenize(text, with_special_token=False)
+            tokens = self.tokenize(text, with_pad=False, 
+                                        with_sos=False, 
+                                        with_eos=False, 
+                                        with_ukn=False,
+                                        ignore_maxlen=True)
             for token in tokens:
                 if token not in vocab_count:
                     vocab_count[token] = 1
@@ -54,7 +64,11 @@ class WMT14Tokenizer:
     def tokenize(
             self, 
             text: str, 
-            with_special_token: bool = True
+            with_pad: bool = True,
+            with_sos: bool = True,
+            with_eos: bool = True,
+            with_ukn: bool = True,
+            ignore_maxlen: bool = False
         ) -> list[str]:
         """文字列をトークン(単語)に分割
         """
@@ -63,27 +77,44 @@ class WMT14Tokenizer:
         words = text.split()
         
         # max_length を超えた場合はクリップ
-        if len(words) > self.max_length:
-            words = words[:self.max_length]
+        if not ignore_maxlen:
+            n_sos_eos = int(with_sos) + int(with_eos)
+            if len(words) > self.max_length - n_sos_eos:
+                words = words[:self.max_length - n_sos_eos]
         
-        # add special tokens
-        if with_special_token:
-            
+        # add <ukn>
+        if with_ukn:
             for i in range(len(words)):
                 if words[i] not in self.id_to_word:
-                    words[i] = '<UKN>'
-                
-            pads = ['<PAD>'] * (self.max_length - len(words))
+                    words[i] = self.unk_token
+        
+        # add <sos>
+        if with_sos:
+            words = [self.pad_token] + words
+            
+        # add <eos>
+        if with_eos:
+            words = words + [self.eos_token]
+        
+        # add <pad>
+        if with_pad:
+            pads = [self.pad_token] * (self.max_length - len(words))
             words += pads
-            words = ['<SOS>'] + words[:-2] + ['<EOS>']
             
         return words
     
     
-    def encode(self, text: str) -> list[int]:
+    def encode(
+            self, 
+            text: str,
+            with_pad: bool = True,
+            with_sos: bool = True,
+            with_eos: bool = True,
+            with_ukn: bool = True
+        ) -> list[int]:
         """トークン化してid列に変換
         """
-        tokens = self.tokenize(text)
+        tokens = self.tokenize(text, with_pad, with_sos, with_eos, with_ukn)
         return [self.word_to_id[word] for word in tokens]
     
     
@@ -102,11 +133,11 @@ class WMT14Tokenizer:
     
     
     def vocab_size(self) -> int:
-        
+        """語彙数を取得
+        """
         return len(self.id_to_word)
     
     
 if __name__ == '__main__':
     pass
-    
     
