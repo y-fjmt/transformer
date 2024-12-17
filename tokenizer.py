@@ -24,7 +24,7 @@ class WMT14Tokenizer:
             self, 
             lang: Literal['en', 'de'], 
             max_length: int = 128,
-            known_cnt: int = 3,
+            known_cnt: int = 5,
             is_debug: bool = False,
             hide_pbar: bool = False
         ) -> None:
@@ -39,7 +39,7 @@ class WMT14Tokenizer:
         if is_debug:
             known_cnt = 1
             dataset = dataset.sort('translation')
-            dataset = dataset.select(range(1000))
+            dataset = dataset.select(range(10000))
         
         for col in tqdm(dataset, disable=hide_pbar):
             text: str = col['translation'][lang]

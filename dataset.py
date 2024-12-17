@@ -30,8 +30,9 @@ class WMT14_DE_EN(Dataset):
         self.tgt_tokenizer = tgt_tokenizer
         
         if is_debug:
+            n_retrieve = (10000 if split == 'train' else 3000)
             self.hf_dataset = self.hf_dataset.sort('translation')
-            self.hf_dataset = self.hf_dataset.select(range(1000))
+            self.hf_dataset = self.hf_dataset.select(range(n_retrieve))
     
     
     def __len__(self) -> int:
