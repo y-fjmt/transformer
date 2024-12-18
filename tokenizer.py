@@ -1,9 +1,10 @@
 from typing import Literal
 from datasets import load_dataset
 from tqdm import tqdm
+import os
 import re
+import pickle
 
-from dataset import WMT14_DE_EN
 
 class WMT14Tokenizer:
     
@@ -19,12 +20,14 @@ class WMT14Tokenizer:
         unk_token
     ]
     
+    dir_name = '.wmt14tokenizer'
+    
     
     def __init__(
             self, 
             lang: Literal['en', 'de'], 
             max_length: int = 128,
-            known_cnt: int = 5,
+            known_cnt: int = 500,
             is_debug: bool = False,
             hide_pbar: bool = False
         ) -> None:
@@ -36,29 +39,43 @@ class WMT14Tokenizer:
         
         dataset = load_dataset('wmt14', 'de-en', split='train')
         
-        if is_debug:
-            known_cnt = 1
-            dataset = dataset.sort('translation')
-            dataset = dataset.select(range(10000))
-        
-        for col in tqdm(dataset, disable=hide_pbar):
-            text: str = col['translation'][lang]
+        if not os.path.exists(self.dir_name):
+            os.makedirs(self.dir_name)
             
-            tokens = self.tokenize(text, with_pad=False, 
-                                        with_sos=False, 
-                                        with_eos=False, 
-                                        with_ukn=False,
-                                        ignore_maxlen=True)
-            for token in tokens:
-                if token not in vocab_count:
-                    vocab_count[token] = 1
-                else:
-                    vocab_count[token] += 1
-                    
+        path = f'{self.dir_name}/{lang}.pickle'
+        if os.path.isfile(path):
+            # 学習済みファイルがあれば読み込む
+            with open(path, 'rb') as fp:
+                clf = pickle.load(fp)
+                self.id_to_word = clf['id_to_word']
+                self.word_to_id = clf['word_to_id']
+        else:
+            # 学習済みファイルがなければ作成
+            for col in tqdm(dataset, disable=hide_pbar):
+                text: str = col['translation'][lang]
+                
+                tokens = self.tokenize(text, with_pad=False, 
+                                            with_sos=False, 
+                                            with_eos=False, 
+                                            with_ukn=False,
+                                            ignore_maxlen=True)
+                for token in tokens:
+                    if token not in vocab_count:
+                        vocab_count[token] = 1
+                    else:
+                        vocab_count[token] += 1
+                        
+                
+            common_words = sorted([word for word, cnt in vocab_count.items() if cnt >= known_cnt])
+            self.id_to_word = self.special_tokens + common_words
+            self.word_to_id = {word: idx for idx, word in enumerate(self.id_to_word)}
             
-        common_words = sorted([word for word, cnt in vocab_count.items() if cnt >= known_cnt])
-        self.id_to_word = self.special_tokens + common_words
-        self.word_to_id = {word: idx for idx, word in enumerate(self.id_to_word)}
+            with open(path, 'wb') as fp:
+                clf = {
+                    'id_to_word': self.id_to_word,
+                    'word_to_id': self.word_to_id
+                }
+                pickle.dump(clf, fp)
     
     
     def tokenize(
@@ -90,7 +107,7 @@ class WMT14Tokenizer:
         
         # add <sos>
         if with_sos:
-            words = [self.pad_token] + words
+            words = [self.sos_token] + words
             
         # add <eos>
         if with_eos:

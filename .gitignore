@@ -173,3 +173,4 @@ data
 *.sif
 slurm-*.log
 *.pth
+.wmt14tokenizer
