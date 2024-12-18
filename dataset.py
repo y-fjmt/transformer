@@ -45,8 +45,8 @@ class WMT14_DE_EN(Dataset):
         src, tgt = translation['en'], translation['de']
         
         src_ids = self.src_tokenizer.encode(src)
-        tgt_ids = self.tgt_tokenizer.encode(tgt, with_sos=False)
-        label_ids = self.tgt_tokenizer.encode(tgt, with_eos=False)
+        tgt_ids = self.tgt_tokenizer.encode(tgt, with_eos=False)
+        label_ids = self.tgt_tokenizer.encode(tgt, with_sos=False)
         
         return torch.tensor(src_ids), torch.tensor(tgt_ids), torch.tensor(label_ids)
 
