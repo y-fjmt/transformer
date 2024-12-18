@@ -36,7 +36,7 @@ class TransformerModel(nn.Module):
         
         self.src_embedding = nn.Embedding(src_vocab_size, d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
-        self.transformer = nn.Transformer(d_model)
+        self.transformer = nn.Transformer(d_model, batch_first=True)
         
         self.fc = nn.Linear(d_model, tgt_vocab_size)
         
@@ -99,41 +99,54 @@ def generate_square_subsequent_mask(seq_len, PAD_IDX):
     
 if __name__ == '__main__':
     
-    tk_en = WMT14Tokenizer('en', max_length=64, is_debug=True)
-    tk_de = WMT14Tokenizer('de', max_length=64, is_debug=True)
-    ds = WMT14_DE_EN('train', tk_en, tk_de, is_debug=True)
-    loader = DataLoader(ds)
+    vocab = 10
+    BS = 2
+    src = torch.randint(0, 9, (BS, 16))
+    tgt = torch.randint(0, 9, (BS, 16))
+    label = torch.randint(0, 9, (BS, 16))
+    
+    # tk_en = WMT14Tokenizer('en', max_length=64, is_debug=True)
+    # tk_de = WMT14Tokenizer('de', max_length=64, is_debug=True)
+    # ds = WMT14_DE_EN('train', tk_en, tk_de, is_debug=True)
+    # loader = DataLoader(ds)
     
     PAD_IDX = 0
     
-    model = TransformerModel(tk_en.vocab_size(), tk_de.vocab_size())
+    model = TransformerModel(vocab, vocab)
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     
-    for src, tgt, label in loader:
-        
-        # (batch_size, seq_len) -> (seq_len, batch_size)
-        src = src.transpose(0, 1)
-        tgt = tgt.transpose(0, 1)
-        print(src.shape)
-        
-        
-        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt, PAD_IDX)
-        
-        # (seq_len, batch_size) -> (seq_len, batch_size, tgt_vocab)
-        logits = model(src, tgt, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask, src_padding_mask)
-        
-
-        # (seq_len, batch_size, tgt_vocab) -> (batch_size, seq_len, tgt_vocab)
-        logits = logits.transpose(0, 1)
-        
-        # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
-        tgt_vocab_size = tk_de.vocab_size()
-        logits = logits.contiguous().view(-1, tgt_vocab_size)
-        
-        # (batch_size * seq_len)
-        label = label.view(-1)
-        
-        loss = loss_fn(logits, label)
-        loss.backward()
-        
-        break
+    print(src.shape)
+    
+    
+    # (BS*num_heads, seq, seq)
+    seq_len = src.shape[1]
+    num_heads = 8
+    src_msk = torch.zeros((seq_len, seq_len)).unsqueeze(0).expand(BS*num_heads, seq_len, seq_len)
+    tgt_msk = nn.Transformer.generate_square_subsequent_mask(seq_len).unsqueeze(0).expand(BS*num_heads, -1, -1)
+    
+    # (N, seq)
+    src_padding_msk = (src == PAD_IDX).float()
+    tgt_padding_msk = (tgt == PAD_IDX).float()
+    
+    print('src_mask:', src_msk.shape)
+    print('tgt_mask:', tgt_msk.shape)
+    print('src_padding_mask:', src_padding_msk.shape)
+    print('tgt_padding_mask:', tgt_padding_msk.shape)
+    
+    
+    logits = model(src, tgt, src_mask=src_msk, tgt_mask=tgt_msk, 
+                           src_padding_mask=src_padding_msk, tgt_padding_mask=tgt_padding_msk, 
+                           memory_key_padding_mask=src_padding_msk)
+    
+    print(logits.shape)
+    
+    # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
+    logits = logits.contiguous().view(-1, vocab)
+    
+    # (batch_size * seq_len)
+    label = label.view(-1)
+    
+    loss = loss_fn(logits, label)
+    loss.backward()
+    
+    print(loss)
