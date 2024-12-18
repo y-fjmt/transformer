@@ -171,6 +171,6 @@ data
 .DS_Store
 
 *.sif
-slurm-*.log
+slurm-*.out
 *.pth
 .wmt14tokenizer
