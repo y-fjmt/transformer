@@ -7,14 +7,15 @@ from model import TransformerModel, create_mask
 from dataset import WMT14_DE_EN
 from tokenizer import WMT14Tokenizer
 
+from accelerate import Accelerator
+
 
 class CFG:
-    DEBUG = True
-    DEVICE = torch.device('cuda' if torch.cuda.is_available else 'cpu')
+    DEBUG = False
     
-    BS = 32
+    BS = 16
     IS_SHUFFLE = True
-    N_WORKERS = 4
+    N_WORKERS = 10
     
     LR = 1e-3
     EPOCHS = 10
@@ -22,6 +23,8 @@ class CFG:
 
 
 if __name__ == '__main__':
+    
+    accelerator = Accelerator()
     
     src_tokenizer = WMT14Tokenizer(lang='en', is_debug=CFG.DEBUG, hide_pbar=False)
     tgt_tokenizer = WMT14Tokenizer(lang='de', is_debug=CFG.DEBUG, hide_pbar=False)
@@ -34,12 +37,13 @@ if __name__ == '__main__':
     trn_loader = DataLoader(trn_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     val_loader = DataLoader(val_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     
-    model = TransformerModel(src_tokenizer.vocab_size(), tgt_tokenizer.vocab_size()).to(CFG.DEVICE)
+    model = TransformerModel(src_tokenizer.vocab_size(), tgt_tokenizer.vocab_size())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     optimizer = optim.Adam(model.parameters(), lr=CFG.LR)
     sheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, CFG.EPOCHS)
     
-    model, optimizer, sheduler, trn_loader, val_loader
+    trn_loader, val_loader = accelerator.prepare(trn_loader, val_loader)
+    model, optimizer, sheduler = accelerator.prepare(model, optimizer, sheduler)
     
     for epoch in range(1, CFG.EPOCHS+1):
         
@@ -51,7 +55,7 @@ if __name__ == '__main__':
         
         for iter_idx, (src, tgt, label) in enumerate(pbar):
             
-            src, tgt, label = src.to(CFG.DEVICE), tgt.to(CFG.DEVICE), label.to(CFG.DEVICE)
+            src, tgt, label = accelerator.prepare(src, tgt, label)
             
             # (batch_size, seq_len) -> (seq_len, batch_size)
             src = src.transpose(0, 1)
@@ -60,8 +64,9 @@ if __name__ == '__main__':
             
             # prepare masks
             src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt, PAD_IDX)
-            src_mask, tgt_mask = src_mask.to(CFG.DEVICE), tgt_mask.to(CFG.DEVICE)
-            src_padding_mask, tgt_padding_mask = src_padding_mask.to(CFG.DEVICE), tgt_padding_mask.to(CFG.DEVICE)
+            
+            src_mask, tgt_mask = accelerator.prepare(src_mask, tgt_mask)
+            src_padding_mask, tgt_padding_mask = accelerator.prepare(src_padding_mask, tgt_padding_mask)
             
             # (seq_len, batch_size) -> (seq_len, batch_size, tgt_vocab)
             logits = model(src, tgt, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask, src_padding_mask)
@@ -95,7 +100,7 @@ if __name__ == '__main__':
             
             for iter_idx, (src, tgt, label) in enumerate(pbar):
             
-                src, tgt, label = src.to(CFG.DEVICE), tgt.to(CFG.DEVICE), label.to(CFG.DEVICE)
+                src, tgt, label = accelerator.prepare(src, tgt, label)
             
                 # (batch_size, seq_len) -> (seq_len, batch_size)
                 src = src.transpose(0, 1)
@@ -104,8 +109,9 @@ if __name__ == '__main__':
                 
                 # prepare masks
                 src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt, PAD_IDX)
-                src_mask, tgt_mask = src_mask.to(CFG.DEVICE), tgt_mask.to(CFG.DEVICE)
-                src_padding_mask, tgt_padding_mask = src_padding_mask.to(CFG.DEVICE), tgt_padding_mask.to(CFG.DEVICE)
+                
+                src_mask, tgt_mask = accelerator.prepare(src_mask, tgt_mask)
+                src_padding_mask, tgt_padding_mask = accelerator.prepare(src_padding_mask, tgt_padding_mask)
                 
                 # (seq_len, batch_size) -> (seq_len, batch_size, tgt_vocab)
                 logits = model(src, tgt, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask, src_padding_mask)
