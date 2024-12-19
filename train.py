@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from model import TransformerModel
 from dataset import WMT14_DE_EN
+from sheduler import CustomLRScheduler
 
 import sentencepiece as spm
 
@@ -46,7 +47,8 @@ if __name__ == '__main__':
     model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     optimizer = optim.Adam(model.parameters(), lr=CFG.LR, betas=[0.9, 0.98], eps=1e-9)
-    sheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, CFG.EPOCHS)
+    # sheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, CFG.EPOCHS)
+    sheduler = CustomLRScheduler(optimizer,d_model=512, warmup_steps=4000)
     
     # (BS*num_heads, seq, seq)
     src_msk = torch.zeros((CFG.SEQ_LEN, CFG.SEQ_LEN)).unsqueeze(0).expand(CFG.BS*CFG.N_HEADS, -1, -1)
