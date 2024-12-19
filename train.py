@@ -6,7 +6,8 @@ from tqdm import tqdm
 
 from model import TransformerModel
 from dataset import WMT14_DE_EN
-from tokenizer import WMT14Tokenizer
+
+import sentencepiece as spm
 
 from accelerate import Accelerator
 
@@ -15,14 +16,14 @@ class CFG:
     
     DEBUG = False
     
-    BS = 256
+    BS = 64
     IS_SHUFFLE = True
     N_WORKERS = 10
     
     SEQ_LEN = 128
     
     LR = 1e-3
-    EPOCHS = 5
+    EPOCHS = 15
     SAVE_AS = 'transformer-weight.pth'
     N_HEADS = 8
 
@@ -31,20 +32,20 @@ if __name__ == '__main__':
     
     accelerator = Accelerator()
     
-    src_tokenizer = WMT14Tokenizer(lang='en', is_debug=CFG.DEBUG, hide_pbar=(not accelerator.is_local_main_process), max_length=CFG.SEQ_LEN)
-    tgt_tokenizer = WMT14Tokenizer(lang='de', is_debug=CFG.DEBUG, hide_pbar=(not accelerator.is_local_main_process), max_length=CFG.SEQ_LEN)
+    tokenizer = spm.SentencePieceProcessor()
+    tokenizer.load('.tokenizer/en_de_bpe_37000.model')
     
-    PAD_IDX = src_tokenizer.word_to_id[src_tokenizer.pad_token]
+    PAD_IDX = tokenizer.pad_id()
     
-    trn_ds = WMT14_DE_EN('train', src_tokenizer, tgt_tokenizer,is_debug=CFG.DEBUG)
-    val_ds = WMT14_DE_EN('val', src_tokenizer, tgt_tokenizer,is_debug=CFG.DEBUG)
+    trn_ds = WMT14_DE_EN('train', tokenizer, CFG.SEQ_LEN, is_debug=CFG.DEBUG)
+    val_ds = WMT14_DE_EN('val', tokenizer, CFG.SEQ_LEN, is_debug=CFG.DEBUG)
     
     trn_loader = DataLoader(trn_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     val_loader = DataLoader(val_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     
-    model = TransformerModel(src_tokenizer.vocab_size(), tgt_tokenizer.vocab_size())
+    model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-    optimizer = optim.Adam(model.parameters(), lr=CFG.LR)
+    optimizer = optim.Adam(model.parameters(), lr=CFG.LR, betas=[0.9, 0.98], eps=1e-9)
     sheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, CFG.EPOCHS)
     
     # (BS*num_heads, seq, seq)
@@ -78,7 +79,7 @@ if __name__ == '__main__':
             
             
             # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
-            tgt_vocab_size = tgt_tokenizer.vocab_size()
+            tgt_vocab_size = tokenizer.piece_size()
             logits = logits.contiguous().view(-1, tgt_vocab_size)
             
             # (batch_size, seq_len) -> (batch_size * seq_len)
@@ -115,7 +116,7 @@ if __name__ == '__main__':
                             memory_key_padding_mask=src_padding_msk)
                 
                 # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
-                tgt_vocab_size = tgt_tokenizer.vocab_size()
+                tgt_vocab_size = tokenizer.piece_size()
                 logits = logits.contiguous().view(-1, tgt_vocab_size)
                 
                 # (batch_size, seq_len) -> (batch_size * seq_len)

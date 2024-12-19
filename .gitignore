@@ -174,3 +174,4 @@ data
 slurm-*.out
 *.pth
 .wmt14tokenizer
+.tokenizer
