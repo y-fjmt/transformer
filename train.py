@@ -16,6 +16,7 @@ from accelerate import Accelerator
 class CFG:
     
     DEBUG = False
+    EXP_NAME = 'EN-DE Translate Model w/ BS:64, CustomSheduler'
     
     BS = 64
     IS_SHUFFLE = True
@@ -33,6 +34,9 @@ if __name__ == '__main__':
     
     accelerator = Accelerator()
     
+    if accelerator.is_local_main_process:
+        print('='*10, CFG.EXP_NAME ,'='*10)
+    
     tokenizer = spm.SentencePieceProcessor()
     tokenizer.load('.tokenizer/en_de_bpe_37000.model')
     
@@ -47,7 +51,6 @@ if __name__ == '__main__':
     model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     optimizer = optim.Adam(model.parameters(), lr=CFG.LR, betas=[0.9, 0.98], eps=1e-9)
-    # sheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, CFG.EPOCHS)
     sheduler = CustomLRScheduler(optimizer,d_model=512, warmup_steps=4000)
     
     # (BS*num_heads, seq, seq)
