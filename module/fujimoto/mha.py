@@ -6,6 +6,9 @@ from torch import nn
 import torch.nn.functional as F
 from typing import Any
 
+# Reference:
+#   - https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+
 
 class MultiHeadAttention(nn.Module):
     
@@ -29,6 +32,9 @@ class MultiHeadAttention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         
+        if embed_dim % num_heads != 0:
+            raise ValueError('`embed_dim` must be split across `num_heads`.')
+        
         self.d_k = kdim if kdim is not None else int(embed_dim / num_heads)
         self.d_v = vdim if vdim is not None else int(embed_dim / num_heads)
         
@@ -36,11 +42,6 @@ class MultiHeadAttention(nn.Module):
         self.W_k = nn.Linear(embed_dim, self.d_k*num_heads, bias)
         self.W_v = nn.Linear(embed_dim, self.d_v*num_heads, bias)
         self.W_o = nn.Linear(self.d_v*num_heads, embed_dim, bias)
-        
-        # print('Wq:', self.W_q.weight.transpose(0, 1).shape)
-        # print('Wk:', self.W_k.weight.transpose(0, 1).shape)
-        # print('Wv:', self.W_v.weight.transpose(0, 1).shape)
-        # print('Wo:', self.W_o.weight.transpose(0, 1).shape)
         
         
     def forward(
@@ -60,17 +61,9 @@ class MultiHeadAttention(nn.Module):
         
         is_batched = query.dim() == 3
         
-        # print('query:', query.shape)
-        
-        Q: torch.Tensor = self.W_q(query)
-        K: torch.Tensor = self.W_k(key)
-        V: torch.Tensor = self.W_v(value)
-        
-        # print('Q:', Q.shape)
-        # print(Q)
-        # print(V)
-        # print('K:', K.shape)
-        # print('V:', V.shape)
+        Q = self.W_q(query)
+        K = self.W_k(key)
+        V = self.W_v(value)
         
         scale = math.sqrt(self.d_k)
         attn = []
@@ -89,28 +82,21 @@ class MultiHeadAttention(nn.Module):
             
             K_i_t = K_i.transpose(-2, -1)
             
-            # print(Q_i.shape)
-            # print(K_i_t.shape)
-            
-            
             attn_mat = torch.matmul(Q_i, K_i_t) / scale
             
+            if attn_mask is not None:
+                attn_mat += attn_mask[::self.num_heads]
+                
+            if key_padding_mask is not None:
+                attn_mat += key_padding_mask.unsqueeze(1)
+                print(attn_mat)
+                
             attn_mat = F.softmax(attn_mat, dim=-1)
 
             attn.append(torch.matmul(attn_mat, V_i))
         
         attn = torch.cat(attn, dim=-1)
-        
-        # print('attn:', attn.shape)
-        # print(attn)
-        
-        # print('self.W_o.bias:', self.W_o.bias.shape)
-        # print(self.W_o.bias[:10])
-        
         mh_attn = self.W_o(attn)
-        
-        # print('mh_attn:', mh_attn.shape)
-        # print(mh_attn)
         
         return mh_attn, None
 
