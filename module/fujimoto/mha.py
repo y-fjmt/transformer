@@ -118,44 +118,21 @@ class MultiHeadAttention(nn.Module):
     def load_weights_from_torch(self, mha: nn.MultiheadAttention) -> None:
         
         if mha._qkv_same_embed_dim:
-            # print(self.W_q.weight.shape)
-            # print(mha.in_proj_weight[0*mha.embed_dim:1*mha.embed_dim, :].shape)
-            
-            self.W_q.weight = nn.Parameter(
-                mha.in_proj_weight.chunk(3)[0]
-            )
-            self.W_k.weight = nn.Parameter(
-                mha.in_proj_weight.chunk(3)[1]
-            )
-            self.W_v.weight = nn.Parameter(
-                mha.in_proj_weight.chunk(3)[2]
-            )
+            W_q, W_k, W_v = mha.in_proj_weight.chunk(3)
+            self.W_q.weight = nn.Parameter(W_q)
+            self.W_k.weight = nn.Parameter(W_k)
+            self.W_v.weight = nn.Parameter(W_v)
             
             if mha.in_proj_bias is not None:
-                # print('bias:', mha.in_proj_bias.shape)
-                self.W_q.bias = nn.Parameter(
-                    mha.in_proj_bias.chunk(3)[0]
-                )
-                self.W_k.bias = nn.Parameter(
-                    mha.in_proj_bias.chunk(3)[1]
-                )
-                self.W_v.bias = nn.Parameter(
-                    mha.in_proj_bias.chunk(3)[2]
-                )   
+                B_q, B_k, B_v =  mha.in_proj_bias.chunk(3)
+                self.W_q.bias = nn.Parameter(B_q)
+                self.W_k.bias = nn.Parameter(B_k)
+                self.W_v.bias = nn.Parameter(B_v)   
             
-            self.W_o.weight = nn.Parameter(
-                mha.out_proj.weight
-            )
-            
-            # print(mha.out_proj.bias)
+            self.W_o.weight = nn.Parameter(mha.out_proj.weight)
             
             if mha.out_proj.bias is not None:
-                
-                # print('mha.out_proj.bias:', mha.out_proj.bias.shape)
-                
-                self.W_o.bias = nn.Parameter(
-                    mha.out_proj.bias
-                ) 
+                self.W_o.bias = nn.Parameter(mha.out_proj.bias)
                 
         else:
             raise NotImplementedError
