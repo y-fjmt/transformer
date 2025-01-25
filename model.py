@@ -26,8 +26,8 @@ class TransformerModel(nn.Module):
     
     def __init__(
             self, 
-            src_vocab_size, 
-            tgt_vocab_size,
+            vocab_size, 
+            seq_len = 128,
             d_model = 512,
             nhead = 8,
             num_encoder_layers = 6,
@@ -37,12 +37,8 @@ class TransformerModel(nn.Module):
         ) -> None:
         super(TransformerModel, self).__init__()
         
-        self.pos_enc = PositionalEncoding(d_model, dropout, 
-                                              max_len=max(src_vocab_size, tgt_vocab_size))
-        
-        # FIXME: 論文は同じtokenizerだから埋め込みは共通でよい？
-        self.src_emb = nn.Embedding(src_vocab_size, d_model)
-        self.tgt_emb = nn.Embedding(tgt_vocab_size, d_model)
+        self.pos_enc = PositionalEncoding(d_model, dropout, max_len=seq_len)
+        self.emb = nn.Embedding(vocab_size, d_model)
         
         self.transformer = nn.Transformer(
             d_model,
@@ -53,7 +49,7 @@ class TransformerModel(nn.Module):
             dropout,
             batch_first=True)
         
-        self.fc = nn.Linear(d_model, tgt_vocab_size)
+        self.fc = nn.Linear(d_model, vocab_size)
         
         
     def enc_forward(
@@ -64,7 +60,7 @@ class TransformerModel(nn.Module):
             src_is_causal = None
     ) -> torch.Tensor:
         
-        src = self.src_emb(src_ids)
+        src = self.emb(src_ids)
         src = self.pos_enc(src)
         
         return self.transformer.encoder(
@@ -83,7 +79,7 @@ class TransformerModel(nn.Module):
         tgt_is_causal = None, memory_is_causal=False,
     ) -> torch.Tensor:
         
-        tgt = self.tgt_emb(tgt_ids)
+        tgt = self.emb(tgt_ids)
         tgt = self.pos_enc(tgt)
         
         return self.transformer.decoder(

@@ -14,5 +14,5 @@ class CFG:
     LR = 1e-3
     LABEL_SMOOTHING = 0.1
     EPOCHS = 15
-    SAVE_AS = 'transformer-weight-ls.pth'
+    SAVE_AS = 'transformer-weight.pth'
     EXP_NAME = f'EN-DE Translate Model, BS:{BS}'
