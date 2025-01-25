@@ -1,5 +1,6 @@
 accelerate
 torch
+torcheval
 datasets
 sentencepiece
 pytest

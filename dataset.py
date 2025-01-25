@@ -43,13 +43,13 @@ class WMT14_DE_EN(Dataset):
         translation = self.hf_dataset[idx]['translation']
         src, tgt = translation['en'], translation['de']
         
-        # src_ids = self.src_tokenizer.encode(src)
-        # tgt_ids = self.tgt_tokenizer.encode(tgt, with_eos=False)
-        # label_ids = self.tgt_tokenizer.encode(tgt, with_sos=False)
+        # sentence -> ids with special tokens
         src_ids = self.tokenizer.Encode(src, out_type=int, add_bos=True, add_eos=True)
         tgt_ids = self.tokenizer.Encode(tgt, out_type=int, add_bos=True)
         label_ids = self.tokenizer.Encode(tgt, out_type=int, add_eos=True)
         
+        # if the length of ids exceeds max length of ids,
+        # crop the ids.
         if len(src_ids) > self.max_seq_len:
             src_ids = src_ids[:self.max_seq_len]
         
@@ -58,7 +58,8 @@ class WMT14_DE_EN(Dataset):
             
         if len(label_ids) > self.max_seq_len:
             label_ids = label_ids[:self.max_seq_len]
-            
+        
+        
         # padding
         pad_id = self.tokenizer.pad_id()
         src_ids +=  [pad_id] * (self.max_seq_len - len(src_ids))
