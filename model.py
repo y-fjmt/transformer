@@ -1,11 +1,6 @@
 import math
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-
-from dataset import WMT14_DE_EN
-from tokenizer import WMT14Tokenizer
 
 
 class PositionalEncoding(nn.Module):
@@ -29,24 +24,84 @@ class PositionalEncoding(nn.Module):
 
 class TransformerModel(nn.Module):
     
-    def __init__(self, src_vocab_size, tgt_vocab_size, d_model = 512):
+    def __init__(
+            self, 
+            src_vocab_size, 
+            tgt_vocab_size,
+            d_model = 512,
+            nhead = 8,
+            num_encoder_layers = 6,
+            num_decoder_layers = 6,
+            dim_feedforward = 2048,
+            dropout = 0.1,
+        ) -> None:
         super(TransformerModel, self).__init__()
         
-        self.pos_encoder = PositionalEncoding(d_model)
+        self.pos_enc = PositionalEncoding(d_model, dropout, 
+                                              max_len=max(src_vocab_size, tgt_vocab_size))
         
-        self.src_embedding = nn.Embedding(src_vocab_size, d_model)
-        self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
-        self.transformer = nn.Transformer(d_model, batch_first=True)
+        # FIXME: 論文は同じtokenizerだから埋め込みは共通でよい？
+        self.src_emb = nn.Embedding(src_vocab_size, d_model)
+        self.tgt_emb = nn.Embedding(tgt_vocab_size, d_model)
+        
+        self.transformer = nn.Transformer(
+            d_model,
+            nhead,
+            num_encoder_layers,
+            num_decoder_layers,
+            dim_feedforward,
+            dropout,
+            batch_first=True)
         
         self.fc = nn.Linear(d_model, tgt_vocab_size)
         
-        self.d_model = d_model
+        
+    def enc_forward(
+            self,
+            src_ids,
+            src_mask, 
+            src_key_padding_mask, 
+            src_is_causal = None
+    ) -> torch.Tensor:
+        
+        src = self.src_emb(src_ids)
+        src = self.pos_enc(src)
+        
+        return self.transformer.encoder(
+            src,
+            mask=src_mask,
+            src_key_padding_mask=src_key_padding_mask,
+            is_causal=src_is_causal,
+        )
+        
+    
+    def dec_forward(
+        self,
+        tgt_ids, memory,
+        tgt_mask, memory_mask,
+        tgt_key_padding_mask, memory_key_padding_mask,
+        tgt_is_causal = None, memory_is_causal=False,
+    ) -> torch.Tensor:
+        
+        tgt = self.tgt_emb(tgt_ids)
+        tgt = self.pos_enc(tgt)
+        
+        return self.transformer.decoder(
+            tgt,
+            memory,
+            tgt_mask=tgt_mask,
+            memory_mask=memory_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=memory_key_padding_mask,
+            tgt_is_causal=tgt_is_causal,
+            memory_is_causal=memory_is_causal,
+        )
         
     
     def forward(
             self, 
-            src: torch.Tensor, 
-            tgt: torch.Tensor,
+            src_ids: torch.Tensor, 
+            tgt_ids: torch.Tensor,
             src_mask: torch.Tensor,
             tgt_mask: torch.Tensor,
             src_padding_mask: torch.Tensor,
@@ -54,99 +109,13 @@ class TransformerModel(nn.Module):
             memory_key_padding_mask: torch.Tensor
         ) -> torch.Tensor:
         
-        # Embedding
-        src_emb = self.src_embedding(src)
-        tgt_emb = self.tgt_embedding(tgt)
+        memory = self.enc_forward(src_ids,
+                                  src_mask, 
+                                  src_padding_mask)
         
-        # Positional Encoding
-        src_emb = self.pos_encoder(src_emb)
-        tgt_emb = self.pos_encoder(tgt_emb)
+        dec_out = self.dec_forward(tgt_ids, memory,
+                                   tgt_mask, src_mask,
+                                   tgt_padding_mask, src_padding_mask)
         
-        output = self.transformer(src_emb, tgt_emb,
-                                  src_mask=src_mask,
-                                  tgt_mask=tgt_mask, memory_mask=None,
-                                  src_key_padding_mask=src_padding_mask,
-                                  tgt_key_padding_mask=tgt_padding_mask,
-                                  memory_key_padding_mask=memory_key_padding_mask)
-        
-        output = self.fc(output)
+        output = self.fc(dec_out)
         return output
-    
-'''
-正方行列の上三角部分に True、それ以外に False を持つ行列を生成する。
-その後、Trueの要素を-infに、Falseの要素を0.0に置き換える。
-'''
-def create_mask(src, tgt, PAD_IDX):
-    
-    seq_len_src = src.shape[0]
-    seq_len_tgt = tgt.shape[0]
-
-    mask_tgt = generate_square_subsequent_mask(seq_len_tgt, PAD_IDX)
-    mask_src = torch.zeros((seq_len_src, seq_len_src))
-
-    padding_mask_src = (src == PAD_IDX).transpose(0, 1).float()
-    padding_mask_tgt = (tgt == PAD_IDX).transpose(0, 1).float()
-    
-    return mask_src, mask_tgt, padding_mask_src, padding_mask_tgt
-
-
-def generate_square_subsequent_mask(seq_len, PAD_IDX):
-    mask = (torch.triu(torch.ones((seq_len, seq_len))) == 1).transpose(0, 1)
-    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == PAD_IDX, float(0.0))
-    return mask
-    
-    
-    
-if __name__ == '__main__':
-    
-    vocab = 10
-    BS = 2
-    src = torch.randint(0, 9, (BS, 16))
-    tgt = torch.randint(0, 9, (BS, 16))
-    label = torch.randint(0, 9, (BS, 16))
-    
-    # tk_en = WMT14Tokenizer('en', max_length=64, is_debug=True)
-    # tk_de = WMT14Tokenizer('de', max_length=64, is_debug=True)
-    # ds = WMT14_DE_EN('train', tk_en, tk_de, is_debug=True)
-    # loader = DataLoader(ds)
-    
-    PAD_IDX = 0
-    
-    model = TransformerModel(vocab, vocab)
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-    
-    print(src.shape)
-    
-    
-    # (BS*num_heads, seq, seq)
-    seq_len = src.shape[1]
-    num_heads = 8
-    src_msk = torch.zeros((seq_len, seq_len)).unsqueeze(0).expand(BS*num_heads, seq_len, seq_len)
-    tgt_msk = nn.Transformer.generate_square_subsequent_mask(seq_len).unsqueeze(0).expand(BS*num_heads, -1, -1)
-    
-    # (N, seq)
-    src_padding_msk = (src == PAD_IDX).float()
-    tgt_padding_msk = (tgt == PAD_IDX).float()
-    
-    print('src_mask:', src_msk.shape)
-    print('tgt_mask:', tgt_msk.shape)
-    print('src_padding_mask:', src_padding_msk.shape)
-    print('tgt_padding_mask:', tgt_padding_msk.shape)
-    
-    
-    logits = model(src, tgt, src_mask=src_msk, tgt_mask=tgt_msk, 
-                           src_padding_mask=src_padding_msk, tgt_padding_mask=tgt_padding_msk, 
-                           memory_key_padding_mask=src_padding_msk)
-    
-    print(logits.shape)
-    
-    # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
-    logits = logits.contiguous().view(-1, vocab)
-    
-    # (batch_size * seq_len)
-    label = label.view(-1)
-    
-    loss = loss_fn(logits, label)
-    loss.backward()
-    
-    print(loss)
