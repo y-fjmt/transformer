@@ -80,7 +80,7 @@ if __name__ == '__main__':
             loss = loss_fn(logits, label)
             
             optimizer.zero_grad()
-            loss.backward()
+            accelerator.backward(loss)
             optimizer.step()
             sheduler.step()
             
