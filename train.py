@@ -6,10 +6,12 @@ from torch.utils.data import DataLoader
 
 import sentencepiece as spm
 from accelerate import Accelerator
+from torcheval.metrics import BLEUScore
 from tqdm import tqdm
 
 from model import TransformerModel
 from dataset import WMT14_DE_EN
+from predict import beam_search
 from sheduler import CustomLRScheduler
 from config import CFG
 
@@ -31,14 +33,14 @@ if __name__ == '__main__':
     val_ds = WMT14_DE_EN('val', tokenizer, CFG.SEQ_LEN, is_debug=CFG.DEBUG)
     
     trn_loader = DataLoader(trn_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
-    val_loader = DataLoader(val_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
+    val_loader = DataLoader(val_ds, CFG.BS // CFG.N_BEAM, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     
     model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=CFG.LABEL_SMOOTHING)
     optimizer = optim.Adam(model.parameters(), lr=CFG.LR, betas=[0.9, 0.98], eps=1e-9)
     sheduler = CustomLRScheduler(optimizer,d_model=512, warmup_steps=4000)
     
-    # create masks that shapes like (BS*num_heads, seq, seq)
+    # create masks that shapes like (seq, seq)
     src_msk = torch.zeros(CFG.SEQ_LEN, CFG.SEQ_LEN)
     tgt_msk = nn.Transformer.generate_square_subsequent_mask(CFG.SEQ_LEN)
     
@@ -54,9 +56,10 @@ if __name__ == '__main__':
         # train
         model.train()
         pbar = tqdm(trn_loader, disable=(not accelerator.is_local_main_process))
-        pbar.set_description(f'[Epoch {epoch:03d}/trn]')
         
         for iter_idx, (src, tgt, label) in enumerate(pbar):
+            
+            optimizer.zero_grad()
             
             src, tgt, label = accelerator.prepare(src, tgt, label)
             
@@ -79,8 +82,8 @@ if __name__ == '__main__':
             
             loss = loss_fn(logits, label)
             
-            optimizer.zero_grad()
             accelerator.backward(loss)
+            accelerator.clip_grad_value_(model.parameters(), CFG.CLIP_VALUE)
             optimizer.step()
             sheduler.step()
             
@@ -93,7 +96,6 @@ if __name__ == '__main__':
         with torch.no_grad():
             
             pbar = tqdm(val_loader, disable=(not accelerator.is_local_main_process))
-            pbar.set_description(f'[Epoch {epoch:03d}/val]')
             
             for iter_idx, (src, tgt, label) in enumerate(pbar):
             
@@ -120,6 +122,35 @@ if __name__ == '__main__':
                 val_loss += loss.item()
                 pbar.set_postfix({'validation_loss': val_loss / ((iter_idx+1)*CFG.BS)})
                 
+                
+            # compute BLEU score using beamsearch
+            metric = BLEUScore(n_gram=CFG.BELU_N_GRAM)
+            pbar = tqdm(val_loader, disable=(not accelerator.is_local_main_process))
+            
+            for src, tgt, label in pbar:
+
+                pred = beam_search(model.module, tokenizer, src)
+                
+                pred_gathered = accelerator.gather_for_metrics(pred)
+                label_gathered = accelerator.gather_for_metrics(label)
+                    
+                candidates = [tokenizer.DecodeIds(x.tolist()) for x in pred_gathered]
+                references = [[tokenizer.DecodeIds(x.tolist())] for x in label_gathered]
+                
+                try:
+                    # 生成された文が短すぎるとBELUが生成できない
+                    metric.update(candidates, references)
+                except ValueError:
+                    pass
+            
+            belu = metric.compute().item() * 100
+        
+        if accelerator.is_local_main_process:
+            print('[Epoch {:03d}/{:03d}]: train_loss: {:.4f}, valid_loss: {:.4f}, BELU: {:.4f}'.format(
+                epoch ,CFG.EPOCHS, 
+                trn_loss/len(trn_ds), val_loss/(len(val_ds)), belu
+            ))
+            print('-'*80)
     
     # finally, save trained model as state_dict
     if accelerator.is_main_process:

@@ -41,7 +41,7 @@ class WMT14_DE_EN(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         
         translation = self.hf_dataset[idx]['translation']
-        src, tgt = translation['en'], translation['de']
+        src, tgt = translation['de'], translation['en']
         
         # sentence -> ids with special tokens
         src_ids = self.tokenizer.Encode(src, out_type=int, add_bos=True, add_eos=True)

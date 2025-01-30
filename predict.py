@@ -1,3 +1,5 @@
+import re
+import sys
 import torch
 from torch import nn
 from tqdm import tqdm
@@ -7,6 +9,7 @@ from model import TransformerModel
 from dataset import WMT14_DE_EN
 
 from torcheval.metrics import BLEUScore
+from accelerate import Accelerator
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -153,30 +156,33 @@ if __name__ == '__main__':
     tokenizer = spm.SentencePieceProcessor()
     tokenizer.load('.tokenizer/en_de_bpe_37000.model')
     
-    model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size()).eval().to(DEVICE)
-    model.load_state_dict(torch.load('transformer-weight-ls.pth', weights_only=True))
+    accelerator = Accelerator()
+    
+    metric = BLEUScore(n_gram=4)
+    model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size()).eval()
+    model.load_state_dict(torch.load('translate-de-en-true.pth', weights_only=True))
     
     ds = WMT14_DE_EN('test', tokenizer)
     loader = DataLoader(ds, batch_size=64)
     
-
-    metric = BLEUScore(n_gram=4)
+    model, loader = accelerator.prepare(model, loader)
     
     with torch.no_grad():
-    
-        for src, tgt, label in tqdm(loader):
-            
-            src, label = src.to(DEVICE), label.to(DEVICE)
-
-            pred = beam_search(model, tokenizer, src)
-
-            if pred.dim() == 1:
-                pred.unsqueeze_(0)
-                label.unsqueeze_(0)
-                
-            candidates = [tokenizer.DecodeIds(x.tolist()) for x in pred]
-            references = [[tokenizer.DecodeIds(x.tolist())] for x in label]
-            metric.update(candidates, references)
         
-    print('BLEU score:', metric.compute().item())
+        for src, tgt, label in loader:
+
+            pred = beam_search(model.module, tokenizer, src)
             
+            pred_gathered = accelerator.gather_for_metrics(pred)
+            label_gathered = accelerator.gather_for_metrics(label)
+                
+            candidates = [tokenizer.DecodeIds(x.tolist()) for x in pred_gathered]
+            references = [[tokenizer.DecodeIds(x.tolist())] for x in label_gathered]
+            metric.update(candidates, references)
+    
+    belu = metric.compute() * 100
+    if accelerator.is_local_main_process:
+        print('BELU:', belu)
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+                
