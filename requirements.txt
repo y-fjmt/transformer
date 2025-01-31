@@ -4,3 +4,4 @@ torcheval
 datasets
 sentencepiece
 pytest
+tensorboard

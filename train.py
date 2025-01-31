@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 import sentencepiece as spm
 from accelerate import Accelerator
@@ -20,9 +21,10 @@ from config import CFG
 if __name__ == '__main__':
     
     accelerator = Accelerator()
+    writer = SummaryWriter(log_dir=CFG.TFB_DIR)
     
     if accelerator.is_local_main_process:
-        print('='*10, CFG.EXP_NAME ,'='*10)
+        print('='*20, CFG.EXP_NAME ,'='*20)
     
     tokenizer = spm.SentencePieceProcessor()
     tokenizer.load('.tokenizer/en_de_bpe_37000.model')
@@ -33,9 +35,9 @@ if __name__ == '__main__':
     val_ds = WMT14_DE_EN('val', tokenizer, CFG.SEQ_LEN, is_debug=CFG.DEBUG)
     
     trn_loader = DataLoader(trn_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
-    val_loader = DataLoader(val_ds, CFG.BS // CFG.N_BEAM, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
+    val_loader = DataLoader(val_ds, CFG.BS_VAL, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS, drop_last=True)
     
-    model = TransformerModel(tokenizer.piece_size(), tokenizer.piece_size())
+    model = TransformerModel(tokenizer.piece_size(), tokenizer.pad_id())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=CFG.LABEL_SMOOTHING)
     optimizer = optim.Adam(model.parameters(), lr=CFG.LR, betas=[0.9, 0.98], eps=1e-9)
     sheduler = CustomLRScheduler(optimizer,d_model=512, warmup_steps=4000)
@@ -88,7 +90,7 @@ if __name__ == '__main__':
             sheduler.step()
             
             trn_loss += loss.item()
-            pbar.set_postfix({'train_loss': trn_loss / ((iter_idx+1)*CFG.BS)})
+            pbar.set_postfix({'train_loss': loss.item() / CFG.BS})
             
             
         # evaluation
@@ -106,9 +108,10 @@ if __name__ == '__main__':
                 tgt_padding_msk = (tgt == PAD_IDX).float()
                 
                 # (seq_len, batch_size) -> (seq_len, batch_size, tgt_vocab)
-                logits = model(src, tgt, src_mask=src_msk, tgt_mask=tgt_msk, 
-                            src_padding_mask=src_padding_msk, tgt_padding_mask=tgt_padding_msk, 
-                            memory_key_padding_mask=src_padding_msk)
+                logits = model(src, tgt, 
+                               src_mask=src_msk, tgt_mask=tgt_msk, 
+                               src_padding_mask=src_padding_msk, tgt_padding_mask=tgt_padding_msk, 
+                               memory_key_padding_mask=src_padding_msk)
                 
                 # (batch_size, seq_len, tgt_vocab) -> (batch_size * seq_len, tgt_vocab)
                 tgt_vocab_size = tokenizer.piece_size()
@@ -120,7 +123,7 @@ if __name__ == '__main__':
                 loss = loss_fn(logits, label)
                 
                 val_loss += loss.item()
-                pbar.set_postfix({'validation_loss': val_loss / ((iter_idx+1)*CFG.BS)})
+                pbar.set_postfix({'validation_loss': loss.item() / CFG.BS_VAL})
                 
                 
             # compute BLEU score using beamsearch
@@ -151,11 +154,16 @@ if __name__ == '__main__':
                 trn_loss/len(trn_ds), val_loss/(len(val_ds)), belu
             ))
             print('-'*80)
+            
+            writer.add_scalar("train loss", trn_loss/len(trn_ds), epoch)
+            writer.add_scalar("validation loss", val_loss/len(val_ds), epoch)
+            writer.add_scalar("BELU score", belu, epoch)
     
     # finally, save trained model as state_dict
     if accelerator.is_main_process:
         torch_model = accelerator.unwrap_model(model).to('cpu')
         torch.save(torch_model.state_dict(), CFG.SAVE_AS)
+        writer.close()
         
     
     # destroy ProcessGroupNCCL
