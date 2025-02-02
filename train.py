@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from torch import optim
@@ -35,7 +34,7 @@ if __name__ == '__main__':
     val_ds = WMT14_DE_EN('val', tokenizer, CFG.SEQ_LEN, is_debug=CFG.DEBUG)
     
     trn_loader = DataLoader(trn_ds, CFG.BS, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
-    val_loader = DataLoader(val_ds, CFG.BS_VAL, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS, drop_last=True)
+    val_loader = DataLoader(val_ds, CFG.BS_VAL, CFG.IS_SHUFFLE, num_workers=CFG.N_WORKERS)
     
     model = TransformerModel(tokenizer.piece_size(), tokenizer.pad_id())
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=CFG.LABEL_SMOOTHING)
@@ -63,8 +62,6 @@ if __name__ == '__main__':
             
             optimizer.zero_grad()
             
-            src, tgt, label = accelerator.prepare(src, tgt, label)
-            
             # (N, seq)
             src_padding_msk = (src == PAD_IDX).float()
             tgt_padding_msk = (tgt == PAD_IDX).float()
@@ -90,7 +87,7 @@ if __name__ == '__main__':
             sheduler.step()
             
             trn_loss += loss.item()
-            pbar.set_postfix({'train_loss': loss.item() / CFG.BS})
+            pbar.set_postfix({'train_loss': loss.item()})
             
             
         # evaluation
@@ -100,8 +97,6 @@ if __name__ == '__main__':
             pbar = tqdm(val_loader, disable=(not accelerator.is_local_main_process))
             
             for iter_idx, (src, tgt, label) in enumerate(pbar):
-            
-                src, tgt, label = accelerator.prepare(src, tgt, label)
             
                 # (N, seq)
                 src_padding_msk = (src == PAD_IDX).float()
@@ -123,7 +118,7 @@ if __name__ == '__main__':
                 loss = loss_fn(logits, label)
                 
                 val_loss += loss.item()
-                pbar.set_postfix({'validation_loss': loss.item() / CFG.BS_VAL})
+                pbar.set_postfix({'validation_loss': loss.item()})
                 
                 
             # compute BLEU score using beamsearch
@@ -151,13 +146,14 @@ if __name__ == '__main__':
         if accelerator.is_local_main_process:
             print('[Epoch {:03d}/{:03d}]: train_loss: {:.4f}, valid_loss: {:.4f}, BELU: {:.4f}'.format(
                 epoch ,CFG.EPOCHS, 
-                trn_loss/len(trn_ds), val_loss/(len(val_ds)), belu
+                trn_loss/len(trn_ds), val_loss/len(val_ds), belu
             ))
             print('-'*80)
             
-            writer.add_scalar("train loss", trn_loss/len(trn_ds), epoch)
-            writer.add_scalar("validation loss", val_loss/len(val_ds), epoch)
+            writer.add_scalar("train loss", trn_loss/len(trn_loader), epoch)
+            writer.add_scalar("validation loss", val_loss/len(val_loader), epoch)
             writer.add_scalar("BELU score", belu, epoch)
+    
     
     # finally, save trained model as state_dict
     if accelerator.is_main_process:
