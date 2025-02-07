@@ -5,18 +5,18 @@ class CFG:
     
     DEBUG = False
     
-    TFB_DIR = 'log/exp_cliped/'
+    TFB_DIR = 'log/exp_seq_rev_1/'
     
-    BS = 128
-    IS_SHUFFLE = True
-    N_WORKERS = 8
+    BS = 64
+    IS_SHUFFLE = False
+    N_WORKERS = 10
     
     SEQ_LEN = 128
     
     LR = 1e-3
     LABEL_SMOOTHING = 0.1
-    EPOCHS = 15
-    SAVE_AS = 'translate-de-en-cliped.pth'
+    EPOCHS = 30
+    SAVE_AS = 'translate-de-en-seq-rev-1.pth'
     EXP_NAME = f'save to {TFB_DIR}'
     
     CLIP_VALUE = 0.5
